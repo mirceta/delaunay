@@ -4,13 +4,44 @@ import random as rnd
 
 from operator import itemgetter
 
+def writeObj(points, tris):
+    file = open('output.obj', 'w')
+    str = ''
+    for p in points:
+        str += 'v {0:.6f} {1:.6f} {2:.6f}\n'.format(p[0], p[1], p[2])
+    str += '\n'
+    for t in tris:
+        str += 'f {} {} {}\n'.format(t[0][0], t[0][1], t[0][2])
+    str = str[:-1]
+    file.write(str)
+    file.close()
+    return True
+
+
 def pointCloudTestData():
     pts = []
     for i in range(10000):
-        x = rnd.random()
-        y = rnd.random()
-        pts.append([x, y, math.sin(x) + math.cos(y)])
+        x = rnd.random() * 50
+        y = rnd.random() * 30
+        pts.append([x, y, 5 * math.sin(x)])
     return pts
+
+def handwrittenTestCase():
+    pts = [[0.1, 0.2, 0.0],
+           [0.2, 0.4, 0.0],
+           [0.3, 0.2, 0.0],
+           [0.4, 0.5, 0.0],
+           [0.5, 0.1, 0.0],
+           [0.565, 0.45, 0.0],
+           [0.7, 0.7, 0.0],
+           [0.8, 0.3, 0.0]]
+    expectedTris = [[1,3,2],
+                    [2,3,4],
+                    [1,3,5],[4,3,5],
+                    [4,5,6],
+                    [4,6,7],[2,4,7],
+                    [6,5,8],[6,7,8]]
+    return pts, expectedTris
 
 class Edges:
 
@@ -59,6 +90,16 @@ class Edges:
     def toString(self):
         return '(' + str(self.v1) + ' ' + str(self.v2) + ')'
 
+    def printCycle(self):
+        head = self
+        curr = self
+        while True:
+            print(curr.toString())
+            curr = curr.next
+            if curr == head:
+                break
+
+
 class Delaunay:
 
     def __init__(self, pts):
@@ -69,22 +110,22 @@ class Delaunay:
         self.initialize()
 
     def initialize(self):
+
         self.pts = sorted(self.pts, key=itemgetter(0))
         self._addSmallRandomFloatToPts()
         self._createFirstTri()
 
-        #for i in range(3, len(self.pts)):
-        #    self._expand(i)
+        for i in range(3, len(self.pts)):
+            self._expand(i)
 
 
-    # low
     def _expand(self, i):
-
         head = self.E
         curr = self.E
         while True:
-            if self._isPointToRightOfVec(self.pts[i], [self.pts[self.E.v1], self.pts[self.E.v2]]):
-                self._connect(i, self.E)
+            if self._isPointToRightOfVec(self.pts[i], [self.pts[curr.v1], self.pts[curr.v2]]):
+                print('found one!')
+                curr = self._connect(i, curr)
             else:
                 # don't extend it
                 pass
@@ -101,20 +142,29 @@ class Delaunay:
         topE = Edges(pidx, E.v2)
 
         if E.getPrev().v1 == bottomE.v2 and E.getPrev().v2 == bottomE.v1: # is previous edge the reversed of the bottom one?
+
+            # create new tri
+            self.tris.append(([E.v2, E.v1, pidx], []))
+
+
+            # fix convex hull
             E.insertInFront(topE)
             E = E.getPrev()
             E = E.removeAndReturnNext().removeAndReturnNext()
 
-            # add new tri
         else:
+
+            # create new tri
+            self.tris.append(([E.v2, E.v1, pidx], []))
+            
+
+            # fix convex hull
             E.insertInFront(topE)
             E.insertBehind(bottomE)
-            E.removeAndReturnNext()
-
-            # add new tri
+            E = E.removeAndReturnNext()
+        return E
 
         # recursive edge legalization
-
 
     def _createFirstTri(self):
         p0 = self.pts[0][:2]
@@ -122,10 +172,10 @@ class Delaunay:
         p2 = self.pts[2][:2]
 
         if self._isPointLeftOfVecStart(p0, p1, p2):
-            self.tris.append([0, 1, 2], [])
+            self.tris.append(([0, 1, 2], []))
             self.E = self._makeEdgeCycle([0, 1, 2])
         else:
-            self.tris.append([1, 0, 2], [])
+            self.tris.append(([1, 0, 2], []))
             self.E = self._makeEdgeCycle([1, 0, 2])
 
     def _isPointToRightOfVec(self, pt, vec):
@@ -196,4 +246,5 @@ class DelaunayTests:
 points = pointCloudTestData()
 d = Delaunay(points)
 DelaunayTests(d)
+writeObj(d.pts, d.tris)
 
