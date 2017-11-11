@@ -11,7 +11,7 @@ def writeObj(points, tris):
         str += 'v {0:.6f} {1:.6f} {2:.6f}\n'.format(p[0], p[1], p[2])
     str += '\n'
     for t in tris:
-        str += 'f {} {} {}\n'.format(t[0][0], t[0][1], t[0][2])
+        str += 'f {} {} {}\n'.format(t[0][0] + 1, t[0][1] + 1, t[0][2] + 1)
     str = str[:-1]
     file.write(str)
     file.close()
@@ -23,7 +23,7 @@ def pointCloudTestData():
     for i in range(10000):
         x = rnd.random() * 50
         y = rnd.random() * 30
-        pts.append([x, y, 5 * math.sin(x)])
+        pts.append([x, y, math.sin(x)])
     return pts
 
 def handwrittenTestCase():
@@ -45,11 +45,12 @@ def handwrittenTestCase():
 
 class Edges:
 
-    def __init__(self, v1idx, v2idx):
+    def __init__(self, v1idx, v2idx, tri):
         self.v1 = v1idx
         self.v2 = v2idx
         self.prev = None
         self.next = None
+        self.tri = tri
 
     def setPrev(self, e):
         self.prev = e
@@ -138,13 +139,20 @@ class Delaunay:
         # It also doesn't make sense, as it's the only edge that can possibly advance the hull
 
         # therefore we only check if the bottom one's reverse is in the hull!
-        bottomE = Edges(E.v1, pidx) # is this clockwise?
-        topE = Edges(pidx, E.v2)
+        if (len(self.tris) == 3):
+            print('')
+        bottomE = Edges(E.v1, pidx, len(self.tris)) # is this clockwise?
+        topE = Edges(pidx, E.v2, len(self.tris))
 
         if E.getPrev().v1 == bottomE.v2 and E.getPrev().v2 == bottomE.v1: # is previous edge the reversed of the bottom one?
 
+            bottomE.tri = E.getPrev().tri # then they are the same
+
             # create new tri
-            self.tris.append(([E.v2, E.v1, pidx], []))
+            currTriIdx = len(self.tris)
+            self.tris.append(([E.v2, E.v1, pidx], [E.tri, bottomE.tri]))
+            self.tris[bottomE.tri][1].append(currTriIdx) # append to bottom neighbor
+            self.tris[E.tri][1].append(currTriIdx) # append to top neighbor
 
 
             # fix convex hull
@@ -152,19 +160,49 @@ class Delaunay:
             E = E.getPrev()
             E = E.removeAndReturnNext().removeAndReturnNext()
 
-        else:
+        else: # 2 new edges
 
             # create new tri
-            self.tris.append(([E.v2, E.v1, pidx], []))
-            
+            currTriIdx = len(self.tris)
+            self.tris.append(([E.v2, E.v1, pidx], [E.tri]))
+            self.tris[E.tri][1].append(currTriIdx)
+
 
             # fix convex hull
             E.insertInFront(topE)
             E.insertBehind(bottomE)
             E = E.removeAndReturnNext()
-        return E
 
         # recursive edge legalization
+
+        return E
+
+    def _isEdgeLegal(self, tri1, tri2):
+        edges1 = self.tri1[0]
+        edges2 = self.tri2[0]
+
+        out_pt1 = list(set(tri2) - set(tri1))
+        out_pt2 = list(set(tri1) - set(tri2))
+        if self._IsTriDelaunay(tri1, out_pt1[0]) and self._isTriDelaunay(tri2, out_pt2[0]):
+            pass
+        else:
+            self._flipEdges()
+
+    def _flipEdges(self):
+        pass
+
+
+    def _IsTriDelaunay(self, tri1, otherPoint):
+
+        # @Wikipedia: Delaunay Triangulation says that otherPoint is within the circumcircle when this determinant is positive
+        A = np.linalg.det([[self.pts[tri1[0]][:2], self.pts[tri1[0]][0] ** 2 + self.pts[tri1[0]][1] ** 2, 1.0],
+                          [self.pts[tri1[1]][:2], self.pts[tri1[1]][0] ** 2 + self.pts[tri1[1]][1] ** 2, 1.0],
+                          [self.pts[tri1[2]][:2], self.pts[tri1[2]][0] ** 2 + self.pts[tri1[2]][1] ** 2, 1.0],
+                          [otherPoint, otherPoint[0] ** 2, otherPoint[1] ** 2, 1.0]])
+        if A > 0:
+            return False
+        else:
+            return True
 
     def _createFirstTri(self):
         p0 = self.pts[0][:2]
@@ -192,16 +230,16 @@ class Delaunay:
             return False
 
     def _makeEdgeCycle(self, verts):
-        head = Edges(verts[0], verts[1])
+        head = Edges(verts[0], verts[1], 0)
         curr = head
         prevVert = verts[1]
         for e in verts[2:]:
-            curr.setNext(Edges(prevVert, e))
+            curr.setNext(Edges(prevVert, e, 0))
             prevVert = e
             prev = curr
             curr = curr.getNext()
             curr.setPrev(prev)
-        curr.setNext(Edges(verts[-1], verts[0]))
+        curr.setNext(Edges(verts[-1], verts[0], 0))
         prev = curr
         curr = curr.getNext()
         curr.setPrev(prev)
@@ -247,4 +285,3 @@ points = pointCloudTestData()
 d = Delaunay(points)
 DelaunayTests(d)
 writeObj(d.pts, d.tris)
-
