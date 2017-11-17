@@ -18,6 +18,18 @@ def writeObj(points, tris):
     return True
 
 
+# test data from http://asrl.utias.utoronto.ca/datasets/3dmap/
+def a200_metData():
+    file = open('a200_met_000.xyz', 'r').read().split('\n')
+    data = []
+    for line in file:
+        a = line.split(' ')
+        if (len(a) < 3):
+            continue
+        data.append([float(a[0]), float(a[1]), float(a[2])])
+    return data
+
+
 def pointCloudTestData():
     pts = []
     for i in range(10000):
@@ -100,12 +112,22 @@ class Edges:
             if curr == head:
                 break
 
+    def count(self):
+        head = self
+        curr = self
+        cnt = 0
+        while True:
+            cnt += 1
+            curr = curr.next
+            if curr == head:
+                return cnt
+
 
 class Delaunay:
 
     def __init__(self, pts):
         self.pts = pts
-        self.tris = [] # 3 points of triangle, 3 pointers to neighbor triangles
+        self.tris = [] # 3 pointers to points of triangle, 3 pointers to neighbor triangles
         self.E = None
 
         self.initialize()
@@ -123,9 +145,10 @@ class Delaunay:
     def _expand(self, i):
         head = self.E
         curr = self.E
-        while True:
+        cnt = curr.count()
+        for j in range(cnt + 2):
             if self._isPointToRightOfVec(self.pts[i], [self.pts[curr.v1], self.pts[curr.v2]]):
-                print('found one!')
+                print('HERE', i)
                 curr = self._connect(i, curr)
             else:
                 # don't extend it
@@ -135,16 +158,26 @@ class Delaunay:
                 break
 
     def _connect(self, pidx, E):
-        # I could not find a case where the upper edge can have it's reverse in the hull
-        # It also doesn't make sense, as it's the only edge that can possibly advance the hull
-
-        # therefore we only check if the bottom one's reverse is in the hull!
-        if (len(self.tris) == 3):
-            print('')
         bottomE = Edges(E.v1, pidx, len(self.tris)) # is this clockwise?
         topE = Edges(pidx, E.v2, len(self.tris))
+        if set([E.getNext().v1, E.getNext().v2]) - set([topE.v1, topE.v2]) == 0 and set([E.getPrev().v1, E.getPrev().v2]) - set([bottomE.v1, bottomE.v2]) == 0:
+            print("Circle completed")
+            return E
 
-        if E.getPrev().v1 == bottomE.v2 and E.getPrev().v2 == bottomE.v1: # is previous edge the reversed of the bottom one?
+        if set([E.getNext().v1, E.getNext().v2]) - set([topE.v1, topE.v2]) == 0: # not sure?
+            print("This actually happened")
+            # create new tri
+            currTriIdx = len(self.tris)
+            self.tris.append([[E.v1, pidx, E.v2], [E.tri, topE.tri]])
+            self.tris[E.tri][1].append(currTriIdx)
+            self.tris[topE.tri][1].append(currTriIdx)
+
+            # fix convex hull
+            E.removeAndReturnNext()
+            E.insertInFront(bottomE)
+            E.removeAndReturnNext()
+
+        elif E.getPrev().v1 == bottomE.v2 and E.getPrev().v2 == bottomE.v1: # is previous edge the reversed of the bottom one?
 
             bottomE.tri = E.getPrev().tri # then they are the same
 
@@ -152,13 +185,24 @@ class Delaunay:
             currTriIdx = len(self.tris)
             self.tris.append(([E.v2, E.v1, pidx], [E.tri, bottomE.tri]))
             self.tris[bottomE.tri][1].append(currTriIdx) # append to bottom neighbor
-            self.tris[E.tri][1].append(currTriIdx) # append to top neighbor
+            self.tris[E.tri][1].append(currTriIdx) # append to base neighbor
 
+            nbrs = [bottomE.tri, E.tri]
 
             # fix convex hull
             E.insertInFront(topE)
             E = E.getPrev()
             E = E.removeAndReturnNext().removeAndReturnNext()
+
+            # !!! NEW !!!
+
+            # legalize edge
+           # for nbr in nbrs:
+            #    if not self._isEdgeLegal(nbr, currTriIdx):
+             #       self._flipEdge(nbr, currTriIdx, E)
+
+
+
 
         else: # 2 new edges
 
@@ -167,42 +211,136 @@ class Delaunay:
             self.tris.append(([E.v2, E.v1, pidx], [E.tri]))
             self.tris[E.tri][1].append(currTriIdx)
 
+            nbr = E.tri
+
 
             # fix convex hull
             E.insertInFront(topE)
             E.insertBehind(bottomE)
             E = E.removeAndReturnNext()
 
-        # recursive edge legalization
+            # !!! NEW !!!
+
+            # legalize edge
+            #if not self._isEdgeLegal(nbr, currTriIdx):
+             #   self._flipEdge(nbr, currTriIdx, E)
 
         return E
 
+
     def _isEdgeLegal(self, tri1, tri2):
-        edges1 = self.tri1[0]
-        edges2 = self.tri2[0]
+        pts1 = self.tris[tri1][0]
+        pts2 = self.tris[tri2][0]
 
-        out_pt1 = list(set(tri2) - set(tri1))
-        out_pt2 = list(set(tri1) - set(tri2))
-        if self._IsTriDelaunay(tri1, out_pt1[0]) and self._isTriDelaunay(tri2, out_pt2[0]):
-            pass
-        else:
-            self._flipEdges()
+        out_pt1 = list(set(pts2) - set(pts1))
+        out_pt2 = list(set(pts1) - set(pts2))
+        if not (self._IsTriDelaunay(tri1, out_pt1[0]) and self._IsTriDelaunay(tri2, out_pt2[0])):
+            return False
+        return True
 
-    def _flipEdges(self):
-        pass
+    def _IsTriDelaunay(self, tri_idx, otherPoint_idx):
 
-
-    def _IsTriDelaunay(self, tri1, otherPoint):
+        tri1 = self.tris[tri_idx][0]
 
         # @Wikipedia: Delaunay Triangulation says that otherPoint is within the circumcircle when this determinant is positive
-        A = np.linalg.det([[self.pts[tri1[0]][:2], self.pts[tri1[0]][0] ** 2 + self.pts[tri1[0]][1] ** 2, 1.0],
-                          [self.pts[tri1[1]][:2], self.pts[tri1[1]][0] ** 2 + self.pts[tri1[1]][1] ** 2, 1.0],
-                          [self.pts[tri1[2]][:2], self.pts[tri1[2]][0] ** 2 + self.pts[tri1[2]][1] ** 2, 1.0],
-                          [otherPoint, otherPoint[0] ** 2, otherPoint[1] ** 2, 1.0]])
+        X = [self.pts[tri1[0]][:2] + [self.pts[tri1[0]][0] ** 2 + self.pts[tri1[0]][1] ** 2, 1.0],
+            self.pts[tri1[1]][:2] + [self.pts[tri1[1]][0] ** 2 + self.pts[tri1[1]][1] ** 2, 1.0],
+            self.pts[tri1[2]][:2] + [self.pts[tri1[2]][0] ** 2 + self.pts[tri1[2]][1] ** 2, 1.0],
+            self.pts[otherPoint_idx][:2] + [self.pts[otherPoint_idx][0] ** 2 + self.pts[otherPoint_idx][1] ** 2, 1.0]]
+        A = np.linalg.det(X)
         if A > 0:
             return False
         else:
             return True
+
+    def _flipEdge(self, tri1, tri2, hull):
+
+
+        # 0. store all neighbors
+        nbrs = [i for i in self.tris[tri1][1]]
+        nbrs += [i for i in self.tris[tri2][1]]
+
+
+        triset1, triset2 = set(self.tris[tri1][0]), set(self.tris[tri2][0])
+
+        ## 1. find the shared edge
+        old_shared = list(triset1 - (triset1 - triset2))
+
+        ## 2. find other points
+        new_shared = list(triset1 - set(old_shared)) + list(triset2 - set(old_shared))
+
+        ## 3. construct new tris
+        T1new = new_shared + [old_shared[0]]
+        T2new = new_shared + [old_shared[1]]
+
+        ## 4. fix orientation (make it CCW)
+        T1new = self._fixOrientation(T1new)
+        T2new = self._fixOrientation(T2new)
+        T1nbrs = []
+        T2nbrs = []
+
+        ## 5. fix neighboring relations
+
+        # for T1new
+        for i in range(3):
+            curr = set([T1new[i], T1new[(i + 1) % 3]])
+            if (len(set(T2new) - curr) == 1):
+                T1nbrs.append(tri2)
+                continue
+
+            for nbr in nbrs:
+                if (len(set(self.tris[nbr][0]) - curr)): # they share an edge!
+                    # correct in neighbor
+                    self._replaceElement(self.tris[nbr][1], tri2, tri1) # if it used to belong to tri2, now it belongs to tri1
+                    # add neighbor to self
+                    T1nbrs.append(nbr)
+                    break
+
+        # for T2new
+        for i in range(3):
+            curr = set([T2new[i], T2new[(i + 1) % 3]])
+            if (len(set(T1new) - curr) == 1):
+                T2nbrs.append(tri1)
+                continue
+
+            for nbr in nbrs:
+                if (len(set(self.tris[nbr][0]) - curr)): # they share an edge!
+                    # correct in neighbor
+                    self._replaceElement(self.tris[nbr][1], tri1, tri2) # if it used to belong to tri2, now it belongs to tri1
+                    # add neighbor to self
+                    T2nbrs.append(nbr)
+                    break
+
+        ## 6. old tris become new
+        self.tris[tri1] = [T1new, T1nbrs]
+        self.tris[tri2] = [T2new, T2nbrs]
+
+        ## 7. fix the hull if necessary
+        tmp = hull.getPrev()
+        for i in range(3):
+            edge = set([tmp.v1, tmp.v2])
+            if len(set(T1new) - edge) == 1: # this is the current edge's triangle!
+                tmp.tri = tri1
+            elif len(set(T2new) - edge) == 1:
+                tmp.tri = tri2
+            tmp = tmp.getNext()
+
+
+
+
+    def _replaceElement(self, list, oldElement, newElement):
+        for i, x in enumerate(list):
+            if (x == oldElement):
+                list[i] = newElement
+                return list
+        return None
+
+    def _fixOrientation(self, tri):
+        if self._isPointToRightOfVec(self.pts[tri[0]], [self.pts[tri[1]], self.pts[tri[2]]]):
+            tri.reverse()
+            return tri
+        else:
+            return tri
 
     def _createFirstTri(self):
         p0 = self.pts[0][:2]
